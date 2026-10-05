@@ -6,6 +6,7 @@ from unittest.mock import mock_open, patch
 import pytest
 
 from litellm.llms.chatgpt.authenticator import Authenticator
+from litellm.llms.chatgpt.common_utils import GetAccessTokenError
 
 
 def _make_jwt(payload: dict) -> str:
@@ -54,10 +55,21 @@ class TestChatGPTAuthenticator:
             token = authenticator.get_access_token()
             assert token == "token-new"
 
+    def test_expired_token_fails_fast_when_device_login_disabled(self, authenticator, monkeypatch):
+        monkeypatch.setenv("CHATGPT_DISABLE_DEVICE_LOGIN", "1")
+        auth_data = json.dumps({"access_token": "token-old", "expires_at": time.time() - 10})
+
+        with (
+            patch("builtins.open", mock_open(read_data=auth_data)),
+            patch.object(authenticator, "_login_device_code") as login,
+            pytest.raises(GetAccessTokenError),
+        ):
+            authenticator.get_access_token()
+
+        login.assert_not_called()
+
     def test_get_account_id_from_id_token(self, authenticator):
-        id_token = _make_jwt(
-            {"https://api.openai.com/auth": {"chatgpt_account_id": "acct-123"}}
-        )
+        id_token = _make_jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct-123"}})
         auth_data = json.dumps({"id_token": id_token})
 
         with (

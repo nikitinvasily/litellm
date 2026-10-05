@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Final, Union
 
 from typing_extensions import TypedDict
 
-from litellm.types.llms.openai import ResponsesAPIResponse
+from litellm.types.llms.openai import OutputItemDoneEvent, ResponsesAPIResponse
 
 if TYPE_CHECKING:
     from litellm import CustomStreamWrapper, LiteLLMLoggingObj, ModelResponse
@@ -74,9 +74,19 @@ class ResponsesToCompletionBridgeHandler:
                     existing.setdefault(key, value)
         return response
 
+    @staticmethod
+    def _restore_empty_output(
+        response: "ResponsesAPIResponse", completed_items: dict[int, dict[str, object]]
+    ) -> "ResponsesAPIResponse":
+        if response.output or not completed_items:
+            return response
+        return response.model_copy(update={"output": [item for _, item in sorted(completed_items.items())]})
+
     def _collect_response_from_stream(self, stream_iter: Iterable[object]) -> "ResponsesAPIResponse":
-        for _ in stream_iter:
-            pass
+        completed_items: Final[dict[int, dict[str, object]]] = {}
+        for event in stream_iter:
+            if isinstance(event, OutputItemDoneEvent):
+                completed_items[event.output_index] = event.item.model_dump(exclude_none=True)
 
         completed: Final[object] = getattr(stream_iter, "completed_response", None)
         response_obj: Final[object] = getattr(completed, "response", None) if completed else None
@@ -87,11 +97,13 @@ class ResponsesToCompletionBridgeHandler:
         response: Final = self._coerce_response_object(response_obj, hidden_params)
         if not isinstance(response, ResponsesAPIResponse):
             raise ValueError("Stream completed response is invalid")
-        return response
+        return self._restore_empty_output(response, completed_items)
 
     async def _collect_response_from_stream_async(self, stream_iter: AsyncIterable[object]) -> "ResponsesAPIResponse":
-        async for _ in stream_iter:
-            pass
+        completed_items: Final[dict[int, dict[str, object]]] = {}
+        async for event in stream_iter:
+            if isinstance(event, OutputItemDoneEvent):
+                completed_items[event.output_index] = event.item.model_dump(exclude_none=True)
 
         completed: Final[object] = getattr(stream_iter, "completed_response", None)
         response_obj: Final[object] = getattr(completed, "response", None) if completed else None
@@ -102,7 +114,7 @@ class ResponsesToCompletionBridgeHandler:
         response: Final = self._coerce_response_object(response_obj, hidden_params)
         if not isinstance(response, ResponsesAPIResponse):
             raise ValueError("Stream completed response is invalid")
-        return response
+        return self._restore_empty_output(response, completed_items)
 
     def validate_input_kwargs(self, kwargs: dict) -> ResponsesToCompletionBridgeHandlerInputKwargs:
         from litellm import LiteLLMLoggingObj
