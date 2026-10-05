@@ -3,13 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 import litellm
 from litellm.completion_extras.litellm_responses_transformation.handler import (
     ResponsesToCompletionBridgeHandler,
 )
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLogging
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
+from litellm.types.llms.openai import OutputItemDoneEvent, ResponseCompletedEvent, ResponsesAPIResponse
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.utils import ModelResponse
 
@@ -17,26 +17,18 @@ from litellm.types.utils import ModelResponse
 def test_is_preformatted_cached_chat_stream_true():
     stream = MagicMock(spec=CustomStreamWrapper)
     stream.custom_llm_provider = "cached_response"
-    assert (
-        ResponsesToCompletionBridgeHandler._is_preformatted_cached_chat_stream(stream)
-        is True
-    )
+    assert ResponsesToCompletionBridgeHandler._is_preformatted_cached_chat_stream(stream) is True
 
 
 def test_is_preformatted_cached_chat_stream_false_wrong_provider():
     stream = MagicMock(spec=CustomStreamWrapper)
     stream.custom_llm_provider = "openai"
-    assert (
-        ResponsesToCompletionBridgeHandler._is_preformatted_cached_chat_stream(stream)
-        is False
-    )
+    assert ResponsesToCompletionBridgeHandler._is_preformatted_cached_chat_stream(stream) is False
 
 
 def test_is_preformatted_cached_chat_stream_false_wrong_type():
     assert (
-        ResponsesToCompletionBridgeHandler._is_preformatted_cached_chat_stream(
-            {"object": "chat.completion.chunk"}
-        )
+        ResponsesToCompletionBridgeHandler._is_preformatted_cached_chat_stream({"object": "chat.completion.chunk"})
         is False
     )
 
@@ -239,9 +231,9 @@ async def test_acompletion_streams_completed_model_response():
 
     assert isinstance(result, CustomStreamWrapper), f"streaming request got {type(result)}"
     chunks = [chunk async for chunk in result]
-    assert "".join(
-        chunk.choices[0].delta.content or "" for chunk in chunks
-    ) == "pong", f"completed response did not stream its content: {chunks}"
+    assert "".join(chunk.choices[0].delta.content or "" for chunk in chunks) == "pong", (
+        f"completed response did not stream its content: {chunks}"
+    )
     assert [c for c in chunks if c.choices[0].finish_reason], "stream never emitted a finish_reason"
 
 
@@ -279,6 +271,55 @@ def _upstream_model_for(handed_model: str, custom_llm_provider: str) -> str:
         litellm_params=GenericLiteLLMParams(custom_llm_provider=custom_llm_provider),
     )
     return upstream_model
+
+
+def _empty_final_response_stream():
+    final_response = ResponsesAPIResponse.model_construct(
+        id="resp_test",
+        object="response",
+        created_at=1700000000,
+        status="completed",
+        model="gpt-5.6-luna",
+        output=[],
+    )
+    done = OutputItemDoneEvent.model_validate(
+        {
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "TITLE_OK"}],
+            },
+        }
+    )
+    completed = ResponseCompletedEvent.model_construct(type="response.completed", response=final_response)
+
+    class Stream:
+        completed_response = completed
+
+        def __iter__(self):
+            yield done
+            yield completed
+
+        async def __aiter__(self):
+            yield done
+            yield completed
+
+    return Stream()
+
+
+def test_chatgpt_nonstream_bridge_recovers_empty_final_output():
+    response = ResponsesToCompletionBridgeHandler()._collect_response_from_stream(_empty_final_response_stream())
+    assert response.output_text == "TITLE_OK"
+
+
+@pytest.mark.asyncio
+async def test_chatgpt_nonstream_bridge_recovers_empty_final_output_async():
+    response = await ResponsesToCompletionBridgeHandler()._collect_response_from_stream_async(
+        _empty_final_response_stream()
+    )
+    assert response.output_text == "TITLE_OK"
 
 
 @pytest.mark.parametrize(

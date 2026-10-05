@@ -66,6 +66,9 @@ class Authenticator:
                 except RefreshAccessTokenError as exc:
                     verbose_logger.warning("ChatGPT refresh token failed, re-login required: %s", exc)
 
+        if os.getenv("CHATGPT_DISABLE_DEVICE_LOGIN") == "1":
+            raise GetAccessTokenError(status_code=401, message="ChatGPT token unavailable; device login disabled")
+
         cooldown_remaining: Final = self._get_device_code_cooldown_remaining(auth_data)
         if cooldown_remaining > 0:
             token: Final = self._wait_for_access_token(cooldown_remaining)

@@ -1,3 +1,19 @@
+<a id="fork-differences"></a>
+
+> [!NOTE]
+> This is a personal fork of [BerriAI/litellm](https://github.com/BerriAI/litellm), maintained by [@nikitinvasily](https://github.com/nikitinvasily). It tracks `upstream/main` and carries the fork-specific fixes listed below.
+
+## Fork differences vs upstream
+
+Changes in this fork that are not in upstream.
+
+### Fixes
+
+- **Codex Responses output recovery**: restores completed output items when a stream's final response unexpectedly contains an empty `output` array, for both synchronous and asynchronous responses-to-completions bridging.
+- **Non-interactive ChatGPT authentication**: setting `CHATGPT_DISABLE_DEVICE_LOGIN=1` makes missing or expired credentials fail with HTTP 401 instead of starting an interactive device-login flow.
+
+---
+
 <h1 align="center">
         🚅 LiteLLM
     </h1>
